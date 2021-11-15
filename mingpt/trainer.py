@@ -11,9 +11,11 @@ import os
 import torch
 import torch.distributed as dist
 import torch.optim as optim
+from torch.optim import SGD
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.distributed import DistributedSampler
+from torch.distributed._fsdp import FullyShardedDataParallel as FSDP
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +46,6 @@ gpu = int(os.environ['LOCAL_RANK'])
 class Trainer:
 
     def __init__(self, model, train_dataset, test_dataset, config):
-        self.model = model.to(rank)
         self.train_dataset = train_dataset
         self.test_dataset = test_dataset
         self.config = config
@@ -53,7 +54,8 @@ class Trainer:
         self.device = 'cpu'
         if torch.cuda.is_available():
             self.device = torch.cuda.current_device()
-            dist.init_process_group("nccl", rank=rank, world_size=world_size)
+            #dist.init_process_group("nccl", rank=rank, world_size=world_size)
+            self.model = model.to(rank)
             self.model = torch.nn.parallel.DistributedDataParallel(self.model)
 
     def save_checkpoint(self):
@@ -65,8 +67,8 @@ class Trainer:
     def train(self):
         model, config = self.model, self.config
         raw_model = model.module if hasattr(self.model, "module") else model
-        optimizer = raw_model.configure_optimizers(config)
-
+        #optimizer = raw_model.configure_optimizers(config)
+        optimizer = SGD(model.parameters(), lr=3e-4)
         def run_epoch(split):
             is_train = split == 'train'
             model.train(is_train)

@@ -7,20 +7,14 @@ logging.basicConfig(
 
 from mingpt.utils import set_seed
 set_seed(42)
-import os
-import torch.distributed as dist
+
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import Dataset
-from torch.distributed._fsdp import FullyShardedDataParallel as FSDP
-
-rank = int(os.environ['RANK'])
-world_size = int(os.environ['WORLD_SIZE'])
-gpu = int(os.environ['LOCAL_RANK'])
-dist.init_process_group("nccl", rank=rank, world_size=world_size)
-
+from torch.utils.data.dataloader import DataLoader
+from tqdm import tqdm
 class AdditionDataset(Dataset):
     """
     Returns addition problems of up to some number of digits in the inputs. Recall
@@ -80,7 +74,7 @@ class AdditionDataset(Dataset):
         y = torch.tensor(dix[1:], dtype=torch.long) # predict the next token in the sequence
         y[:self.ndigit*2-1] = -100 # we will only train in the output locations. -100 will mask loss to zero
         return x, y
-
+'''
 # create a dataset for e.g. 2-digit addition
 ndigit = 2
 train_dataset = AdditionDataset(ndigit=ndigit, split='train')
@@ -92,14 +86,91 @@ from mingpt.model import GPT, GPTConfig, GPT1Config
 mconf = GPTConfig(train_dataset.vocab_size, train_dataset.block_size,
                   n_layer=12, n_head=12, n_embd=768)
 
-model = FSDP(GPT(mconf))
+model = GPT(mconf)
+'''
+import os
+import sys
+import torch
+import torch.nn as nn
+from torch.nn import Linear, Module, Sequential
+from torch import distributed as dist
+import torchvision
+import numpy as np
+from torch.distributed._fsdp import FullyShardedDataParallel as FSDP
+from torch.nn import Linear
+from torch.optim import SGD
+from torch.optim import Adam
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fsdp import (
+    FSDPTest,
+    get_full_params,
+)
+from torch.testing._internal.common_utils import TEST_WITH_DEV_DBG_ASAN, run_tests
+from torch.nn.parallel import DistributedDataParallel as DDP
+import torch.nn.functional as F
 
+def print_peak_memory(prefix, device):
+    if device == 0:
+        print(f"{prefix}: {torch.cuda.max_memory_allocated(device) // 1e6}MB ")
 
-from mingpt.trainer import Trainer, TrainerConfig
+class TestUnevenParamShard(FSDPTest):
+    @skip_if_lt_x_gpu(2)
+    def test_one_iteration(self):
+        """Test FSDP with parameter shards."""
+        # create a dataset for e.g. 2-digit addition
+        ndigit = 2
+        train_dataset = AdditionDataset(ndigit=ndigit, split='train')
+        test_dataset = AdditionDataset(ndigit=ndigit, split='test')
 
-# initialize a trainer instance and kick off training
-tconf = TrainerConfig(max_epochs=50, batch_size=512, learning_rate=6e-4,
-                      lr_decay=True, warmup_tokens=1024, final_tokens=50*len(train_dataset)*(ndigit+1),
-                      num_workers=4)
-trainer = Trainer(model, train_dataset, test_dataset, tconf)
-trainer.train()
+        from mingpt.model import GPT, GPTConfig, GPT1Config
+
+        # initialize a baby GPT model
+        mconf = GPTConfig(train_dataset.vocab_size, train_dataset.block_size,
+                  n_layer=12, n_head=12, n_embd=768)
+
+        model = GPT(mconf)
+        print_peak_memory("Peak Memory before loading model", self.rank)
+        my_lr = 0.1
+        model = FSDP(model).cuda()
+        print_peak_memory("Peak Memory before loading model", self.rank)
+        print_peak_memory("Load model to GPU...", self.rank)
+        optim = SGD(model.parameters(), lr=my_lr)
+        '''
+        with torch.profiler.profile(
+            schedule=torch.profiler.schedule(wait=1, warmup=1, active=20, repeat=1),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler('../num-20/test_mem_to_time_100/model_12'),
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=True,
+            with_flops=True,
+        ) as prof:
+        '''
+
+        for i in range(30):
+            #data = torch.randn(1, 1024, 3, 3)
+            #target = torch.randn(1, 1024, 3, 3)
+            data = train_dataset
+            loader = DataLoader(data, shuffle=True, pin_memory=True,
+                                batch_size=512,
+                                num_workers=4)
+
+            losses = []
+            pbar = tqdm(enumerate(loader), total=len(loader))
+            for it, (x, y) in pbar:
+
+                # place data on the correct device
+                x = x.cuda()
+                y = y.cuda()
+
+                # forward the model
+    
+                logits, loss = model(x, y)
+                loss = loss.mean() # collapse all losses if they are scattered on multiple gpus
+                losses.append(loss.item())
+                # backprop and update the parameters
+                model.zero_grad()
+                loss.backward()
+                optim.step()
+
+if __name__ == "__main__":
+    run_tests()
