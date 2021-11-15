@@ -5,7 +5,6 @@ so nothing in this file really has anything to do with GPT specifically.
 
 import math
 import logging
-
 from tqdm import tqdm
 import numpy as np
 import os
@@ -15,7 +14,6 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.distributed import DistributedSampler
-
 
 logger = logging.getLogger(__name__)
 

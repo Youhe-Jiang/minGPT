@@ -1,21 +1,3 @@
-import torch
-import torch.nn as nn
-from torch.nn import Linear, Module, Sequential
-from torch import distributed as dist
-import torchvision
-import numpy as np
-from torch.distributed._fsdp import FullyShardedDataParallel as FSDP
-from torch.nn import Linear
-from torch.optim import SGD
-from torch.optim import Adam
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import (
-    FSDPTest,
-    get_full_params,
-)
-from torch.testing._internal.common_utils import TEST_WITH_DEV_DBG_ASAN, run_tests
-from torch.nn.parallel import DistributedDataParallel as DDP
-import torch.nn.functional as F
 import logging
 logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
@@ -30,8 +12,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-
-
 from torch.utils.data import Dataset
 
 class AdditionDataset(Dataset):
