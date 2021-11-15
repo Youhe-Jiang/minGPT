@@ -8,11 +8,14 @@ import logging
 
 from tqdm import tqdm
 import numpy as np
-
+import os
 import torch
+import torch.distributed as dist
 import torch.optim as optim
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data.dataloader import DataLoader
+from torch.utils.data.distributed import DistributedSampler
+
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +39,14 @@ class TrainerConfig:
         for k,v in kwargs.items():
             setattr(self, k, v)
 
+rank = int(os.environ['RANK'])
+world_size = int(os.environ['WORLD_SIZE'])
+gpu = int(os.environ['LOCAL_RANK'])
+
 class Trainer:
 
     def __init__(self, model, train_dataset, test_dataset, config):
-        self.model = model
+        self.model = model.to(rank)
         self.train_dataset = train_dataset
         self.test_dataset = test_dataset
         self.config = config
@@ -48,7 +55,8 @@ class Trainer:
         self.device = 'cpu'
         if torch.cuda.is_available():
             self.device = torch.cuda.current_device()
-            self.model = torch.nn.DataParallel(self.model).to(self.device)
+            dist.init_process_group("nccl", rank=rank, world_size=world_size)
+            self.model = torch.nn.parallel.DistributedDataParallel(self.model)
 
     def save_checkpoint(self):
         # DataParallel wrappers keep raw model object in .module attribute
@@ -74,8 +82,8 @@ class Trainer:
             for it, (x, y) in pbar:
 
                 # place data on the correct device
-                x = x.to(self.device)
-                y = y.to(self.device)
+                x = x.to(gpu)
+                y = y.to(gpu)
 
                 # forward the model
                 with torch.set_grad_enabled(is_train):
