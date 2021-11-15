@@ -92,7 +92,7 @@ from mingpt.model import GPT, GPTConfig, GPT1Config
 mconf = GPTConfig(train_dataset.vocab_size, train_dataset.block_size,
                   n_layer=12, n_head=12, n_embd=768)
 
-model = FSDP(GPT(mconf))
+model = GPT(mconf)
 
 
 from mingpt.trainer import Trainer, TrainerConfig
